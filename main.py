@@ -56,6 +56,13 @@ RECENCY_HALFLIFE_H = 48.0  # recency weight halves every 48 hours
 SHRINK_K = 0.5  # ridge weight (in x-variance units) pulling a slope to its tier prior
 QUAD_RIDGE = 0.5  # ridge penalty on the quadratic term, as a share of total weight
 SPREAD_FLOOR = 0.4  # logit units: no forecast is more certain than this
+SPREAD_FLOOR_WIDE = 1.0  # logit units: floor when a case's history has
+# at most 2 distinct pages, i.e. no usable trend at all (a flat launch-night
+# page can jump at the next refresh: 638 players tracked became 3,868 and
+# every rate but the one at 100% fell). v2: the real practice grade came back
+# 1.29 with only 1.8% coverage, because the flat-history spread collapsed
+# to ~0.43 logit; the wide floor only triggers on flat histories, so the
+# final-like cases (15+ distinct pages) are untouched.
 SPREAD_HORIZON = 0.20  # random-walk spread per sqrt(day) of horizon
 SPREAD_CAP = 1.8  # widest spread allowed, in logit units
 RESID_FLOOR = 0.15  # smallest residual spread credited to a fit
@@ -189,6 +196,9 @@ def wls_quad(xs: list, ys: list, ws: list, ridge_c: float) -> tuple:
 def forecast_case(case: dict) -> dict:
     trophies = case["trophies"]
     history = distinct_reads(case["history"])
+    # v2: a flat history carries no trend, so one refresh can move every
+    # rate at once — widen the spread floor for such cases only.
+    spread_floor = SPREAD_FLOOR_WIDE if len(history) <= 2 else SPREAD_FLOOR
     target = parse_time(case["target"])
     x_target = math.log1p(hours_since_launch(target))
     horizon_days = case["horizon_minutes"] / 1440.0
@@ -290,7 +300,7 @@ def forecast_case(case: dict) -> dict:
                 max(s_resid, RESID_FLOOR) ** 2
                 + (se_slope * dx) ** 2
                 + (SPREAD_HORIZON * math.sqrt(horizon_days)) ** 2
-                + SPREAD_FLOOR ** 2
+                + spread_floor ** 2
             )
             spread = min(SPREAD_CAP, spread)
         row = [round4(min(99.99, max(0.01, inv_logit(med_logit + z * spread)))) for z in Z]
